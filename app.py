@@ -3,17 +3,21 @@ import requests
 
 app = Flask(__name__)
 
+# IMPORTANT: Weather.gov requires a unique User-Agent string
+HEADERS = {
+    'User-Agent': '(my-weather-app, contact@example.com)'
+}
+
 def get_coords(city_name):
-    """Converts a US City Name to Lat/Long using US Census Geocoder."""
-    geo_url = f"https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={city_name}&benchmark=2020&format=json"
+    """Uses OpenStreetMap Nominatim to find Lat/Long for a City Name."""
+    url = f"https://nominatim.openstreetmap.org/search?q={city_name}&format=json&limit=1"
     try:
-        res = requests.get(geo_url).json()
-        address_matches = res['result']['addressMatches']
-        if address_matches:
-            coords = address_matches[0]['coordinates']
-            return coords['y'], coords['x'] # latitude, longitude
-    except:
-        return None, None
+        response = requests.get(url, headers=HEADERS)
+        data = response.json()
+        if data:
+            return data[0]['lat'], data[0]['lon']
+    except Exception as e:
+        print(f"Geocoding error: {e}")
     return None, None
 
 @app.route('/', methods=['GET', 'POST'])
@@ -26,22 +30,29 @@ def index():
         lat, lon = get_coords(city)
         
         if lat and lon:
-            # Step 1: Get the NWS grid points
-            point_res = requests.get(f"https://api.weather.gov/points/{lat},{lon}").json()
-            forecast_url = point_res['properties']['forecast']
-            
-            # Step 2: Get the actual forecast
-            forecast_res = requests.get(forecast_url).json()
-            current = forecast_res['properties']['periods'][0] # Latest period
-            
-            weather_data = {
-                'temp': current['temperature'],
-                'unit': current['temperatureUnit'],
-                'desc': current['shortForecast'],
-                'wind': f"{current['windSpeed']} {current['windDirection']}",
-                'icon': current['icon'], # NWS provides a direct icon URL
-                'detailed': current['detailedForecast']
-            }
+            try:
+                # Step 1: Get the NWS grid points
+                point_url = f"https://api.weather.gov/points/{lat},{lon}"
+                point_res = requests.get(point_url, headers=HEADERS).json()
+                
+                # Get the URL for the forecast
+                forecast_url = point_res['properties']['forecast']
+                
+                # Step 2: Get the actual forecast data
+                forecast_res = requests.get(forecast_url, headers=HEADERS).json()
+                current = forecast_res['properties']['periods'][0]
+                
+                weather_data = {
+                    'temp': current['temperature'],
+                    'unit': current['temperatureUnit'],
+                    'desc': current['shortForecast'],
+                    'wind': f"{current['windSpeed']} {current['windDirection']}",
+                    'icon': current['icon'],
+                    'detailed': current['detailedForecast']
+                }
+            except Exception as e:
+                print(f"Weather API error: {e}")
+                city = f"Error: Could not fetch weather for {city}."
 
     return render_template('index.html', weather=weather_data, city=city)
 
